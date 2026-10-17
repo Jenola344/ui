@@ -21,9 +21,9 @@ import type {
 } from "./client";
 import {
   DEFAULT_MOCK_TIMESTAMP,
+  deterministicMock,
   DeterministicMockClock,
   DeterministicMockData,
-  deterministicMock,
 } from "./deterministic-mock";
 
 // Valid Stellar testnet address (56 chars: G + 55 uppercase alphanumeric)
@@ -722,34 +722,7 @@ export function createMockClient(
           entries,
         };
         return {
-      setFailureSequence: (
-        sequence: MockFailureStep[],
-        operation = "*",
-      ) => {
-        failureSequences.set(operation, [...sequence]);
-      },
-      advanceTime: (milliseconds: number) =>
-        mockData.advanceTime(milliseconds),
-    };
-
-    return new Proxy(client as MockSorokitClient, {
-      get(target, property, receiver) {
-        const value = Reflect.get(target, property, receiver);
-        if (
-          typeof property === "string" &&
-          ["wallet", "account", "transaction", "soroban", "network", "nft", "operation", "allowance", "batch"].includes(property) &&
-          typeof value === "object" &&
-          value !== null
-        ) {
-          return interceptMockOperations(
-            value as Record<string, unknown>,
-            property,
-            failureSequences,
-          );
-        }
-        return value;
-      },
-    });
+          data: batchResult,
           error: null,
           batchId,
         };
@@ -793,5 +766,42 @@ export function createMockClient(
         error: null,
       }),
     },
-  } as SorokitClient;
+    setFailureSequence: (
+      sequence: MockFailureStep[],
+      operation = "*",
+    ) => {
+      failureSequences.set(operation, [...sequence]);
+    },
+    advanceTime: (milliseconds: number) =>
+      mockData.advanceTime(milliseconds),
+  };
+
+  return new Proxy(client as MockSorokitClient, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (
+        typeof property === "string" &&
+        [
+          "wallet",
+          "account",
+          "transaction",
+          "soroban",
+          "network",
+          "nft",
+          "operation",
+          "allowance",
+          "batch",
+        ].includes(property) &&
+        typeof value === "object" &&
+        value !== null
+      ) {
+        return interceptMockOperations(
+          value as Record<string, unknown>,
+          property,
+          failureSequences,
+        );
+      }
+      return value;
+    },
+  });
 }
