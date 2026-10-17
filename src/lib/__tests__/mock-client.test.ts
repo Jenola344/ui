@@ -1,8 +1,94 @@
-import { describe, expect,it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { SorokitClient } from '../client';
 import { deterministicMock,DeterministicMockData } from '../deterministic-mock';
 import { createMockClient,MOCK_ADDRESS } from '../mock-client';
+import { fetchWithRetry, formatStellarError } from '../rpc';
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('RPC retry behavior', () => {
+  it('retries network dropouts with exponential backoff and jitter', async () => {
+    const wait = vi.fn(async (_milliseconds: number, _signal?: AbortSignal) =>
+      Promise.resolve(),
+    );
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Network request failed'))
+      .mockRejectedValueOnce(new TypeError('Network request failed'))
+      .mockResolvedValueOnce({ status: 200 } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchWithRetry('https://rpc.example', undefined, {
+      baseDelayMs: 100,
+      random: () => 0.25,
+      wait,
+    });
+
+    expect(result.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(wait.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
+      75,
+      150,
+    ]);
+  });
+
+  it.each([429, 502, 503, 504])('retries HTTP %i responses', async (status) => {
+    const wait = vi.fn(async (_milliseconds: number, _signal?: AbortSignal) =>
+      Promise.resolve(),
+    );
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ status } as Response)
+      .mockResolvedValueOnce({ status: 200 } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchWithRetry('https://rpc.example', undefined, {
+      baseDelayMs: 100,
+      random: () => 0.5,
+      wait,
+    });
+
+    expect(result.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(100, undefined);
+  });
+
+  it('stops after three retries when the endpoint remains unavailable', async () => {
+    const wait = vi.fn(async (_milliseconds: number, _signal?: AbortSignal) =>
+      Promise.resolve(),
+    );
+    const fetchMock = vi.fn().mockResolvedValue({ status: 503 } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchWithRetry('https://rpc.example', undefined, {
+      baseDelayMs: 100,
+      random: () => 0.5,
+      wait,
+    });
+
+    expect(result.status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(wait.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
+      100,
+      200,
+      400,
+    ]);
+  });
+
+  it('exposes Horizon operation result codes alongside the detail', () => {
+    expect(
+      formatStellarError({
+        detail: 'Transaction failed',
+        extras: {
+          result_codes: {
+            operations: ['op_underfunded', 'op_bad_auth'],
+          },
+        },
+      }),
+    ).toBe(
+      'Transaction failed (operation codes: op_underfunded, op_bad_auth)',
+    );
+  });
+});
 
 describe('Mock Client - Issue #30 Fixes', () => {
   describe('Fix 1: Valid MOCK_ADDRESS', () => {
