@@ -209,6 +209,51 @@ describe('Mock Client - Issue #30 Fixes', () => {
 
       expect(snapshot1).toEqual(snapshot2);
     });
+
+    it('produces identical responses from separately created clients with the same seed', async () => {
+      const client1 = createMockClient({ seed: 8128 });
+      const client2 = createMockClient({ seed: 8128 });
+
+      const [response1, history1, response2, history2] = await Promise.all([
+        client1.transaction.submit(),
+        client1.transaction.getHistory(MOCK_ADDRESS),
+        client2.transaction.submit(),
+        client2.transaction.getHistory(MOCK_ADDRESS),
+      ]);
+
+      expect(response1).toEqual(response2);
+      expect(history1).toEqual(history2);
+    });
+
+    it('advances mock ledger timestamps without using real time', async () => {
+      const client = createMockClient();
+      const before = await client.transaction.getHistory(MOCK_ADDRESS, 1, 1);
+      const initialTimestamp = Date.parse(before.data![0].createdAt);
+
+      expect(client.advanceTime(60_000)).toBe(1700000060000);
+
+      const after = await client.transaction.getHistory(MOCK_ADDRESS, 1, 1);
+      expect(Date.parse(after.data![0].createdAt)).toBe(initialTimestamp + 60_000);
+    });
+  });
+
+  describe('Mock operation failure injection', () => {
+    it('plays through sequential errors before allowing the operation to succeed', async () => {
+      const client = createMockClient();
+      const firstError = new Error('temporary failure 1');
+      const secondError = new Error('temporary failure 2');
+      client.setFailureSequence(
+        [firstError, secondError, 'success'],
+        'transaction.submit',
+      );
+
+      await expect(client.transaction.submit()).rejects.toBe(firstError);
+      await expect(client.transaction.submit()).rejects.toBe(secondError);
+      const result = await client.transaction.submit();
+
+      expect(result.error).toBeNull();
+      expect(result.data).not.toBeNull();
+    });
   });
 
   describe('Fix 4: Pagination support in getHistory (Issue #588)', () => {
