@@ -76,9 +76,10 @@ describe("useOutsideClick", () => {
     rerender({ enabled: false });
 
     // Verify cleanup was called
-    expect(removeSpy).toHaveBeenCalledWith("pointerdown", expect.any(Function));
-    expect(removeSpy).toHaveBeenCalledWith("touchstart", expect.any(Function));
-    expect(removeSpy).toHaveBeenCalledWith("mousedown", expect.any(Function));
+    const expectedOptions = { capture: true, passive: true };
+    expect(removeSpy).toHaveBeenCalledWith("pointerdown", expect.any(Function), expectedOptions);
+    expect(removeSpy).toHaveBeenCalledWith("touchstart", expect.any(Function), expectedOptions);
+    expect(removeSpy).toHaveBeenCalledWith("mousedown", expect.any(Function), expectedOptions);
 
     // Verify handler is not called after disabled
     handler.mockClear();
@@ -86,6 +87,37 @@ describe("useOutsideClick", () => {
     fireEvent.pointerDown(outsideNode);
     fireEvent.touchStart(outsideNode);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("removes the exact document listeners that were added when disabled", () => {
+    vi.restoreAllMocks();
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+
+    const { rerender } = renderHook(
+      ({ enabled }) => useOutsideClick(vi.fn(), enabled),
+      { initialProps: { enabled: true } },
+    );
+
+    const eventTypes = ["pointerdown", "touchstart", "mousedown"] as const;
+    const addedListeners = new Map<string, EventListenerOrEventListenerObject>();
+    for (const [type, listener] of addSpy.mock.calls) {
+      if (eventTypes.includes(type as (typeof eventTypes)[number])) {
+        addedListeners.set(type, listener);
+      }
+    }
+    expect(addedListeners.size).toBe(eventTypes.length);
+
+    // Toggling enabled to false must remove the very same listener instances.
+    rerender({ enabled: false });
+
+    for (const type of eventTypes) {
+      const removedCall = removeSpy.mock.calls.find(([eventType]) => eventType === type);
+      expect(removedCall).toBeDefined();
+      expect(removedCall?.[1]).toBe(addedListeners.get(type));
+    }
+
+    vi.restoreAllMocks();
   });
 
   it("reattaches event listeners when enabled toggles back to true", () => {
