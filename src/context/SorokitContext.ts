@@ -19,7 +19,7 @@ export interface SorokitState {
    * present when the page first rendered.
    */
   detectedWallets?: string[];
-  isHardware?: boolean;
+  /**
    * Whether the connected wallet is a hardware wallet.
    *
    * Owned by the provider so detection lives in exactly one place (#845). It was
