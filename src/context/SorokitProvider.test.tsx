@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode, useEffect, useRef, useState } from "react";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithProvider } from "@/__tests__/utils";
@@ -111,6 +112,8 @@ describe("SorokitProvider", () => {
     for (const key of WALLET_GLOBALS) {
       delete (window as unknown as Record<string, unknown>)[key];
     }
+  });
+
   // #845 — the provider is the single source of truth for hardware state. These
   // cover the contract the button now relies on: isHardware is exposed, it is
   // set during connectWallet, and it does not outlive the session on disconnect.
@@ -1052,6 +1055,46 @@ describe("SorokitProvider", () => {
       );
     });
 
+    // #852 — regression test. A throwing disconnect() adapter must leave context.error
+    // non-null, populate walletError with the exception message, and settle isDisconnecting to false.
+    it("asserts disconnect error is visible after isDisconnecting resets (#852)", async () => {
+      const disconnectErrorMessage = "Wallet adapter disconnected with error";
+      mockClient.wallet.disconnect = vi
+        .fn()
+        .mockRejectedValue(new Error(disconnectErrorMessage));
+
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+      });
+
+      expect(screen.getByTestId("error")).toHaveTextContent("none");
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Disconnect"));
+      });
+
+      // isDisconnecting is false after failure
+      expect(screen.getByTestId("isDisconnecting")).toHaveTextContent("false");
+
+      // context.error is non-null and contains the error message
+      await waitFor(() => {
+        expect(screen.getByTestId("error")).toHaveTextContent(
+          disconnectErrorMessage,
+        );
+      });
+      expect(screen.getByTestId("error")).not.toHaveTextContent("none");
+
+      // Error string from the exception is in walletError
+      expect(screen.getByTestId("walletError")).toHaveTextContent(
+        disconnectErrorMessage,
+      );
+    });
+
     it("points getClient() at the provider's client on mount", async () => {
       await act(async () => {
         renderWithProvider(<TestComponent />, { client: mockClient });
@@ -1335,6 +1378,44 @@ describe("SorokitProvider", () => {
       expect(screen.getByTestId("error")).toHaveTextContent(
         'Cannot add custom network with built-in name "testnet".',
       );
+    });
+  });
+
+  describe("SSR safety (#724)", () => {
+    it("renders without throwing when window is unavailable (SSR/Node.js)", () => {
+      vi.stubGlobal("window", undefined);
+      try {
+        expect(() =>
+          renderToString(
+            <SorokitProvider client={mockClient}>
+              <div>ssr-child</div>
+            </SorokitProvider>,
+          ),
+        ).not.toThrow();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("initializes customNetworks to [] when window is unavailable", () => {
+      const Probe = () => {
+        const { customNetworks } = useSorokit();
+        return <div data-testid="count">{customNetworks.length}</div>;
+      };
+
+      vi.stubGlobal("window", undefined);
+      let html: string;
+      try {
+        html = renderToString(
+          <SorokitProvider client={mockClient}>
+            <Probe />
+          </SorokitProvider>,
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+
+      expect(html).toContain("0");
     });
   });
 
