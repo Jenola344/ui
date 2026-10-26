@@ -181,6 +181,17 @@ export function SorobanPanel({
     !contractIdError &&
     state !== "loading";
 
+  // Switching from one loaded ABI method to another means the previous
+  // method's arguments no longer apply, so drop them instead of submitting
+  // them against the wrong signature.
+  function handleMethodChange(raw: string) {
+    const next = raw.slice(0, 64);
+    if (next !== method && abiMethods.includes(method) && abiMethods.includes(next)) {
+      setArgs("");
+    }
+    setMethod(next);
+  }
+
   async function doInvoke() {
     if (!canInvoke) return;
     // Belt-and-suspenders: canInvoke already covers this, but doInvoke can
@@ -392,7 +403,7 @@ export function SorobanPanel({
                 type="text"
                 placeholder="transfer, balance, mint…"
                 value={method}
-                onChange={(e) => setMethod(e.target.value.slice(0, 64))}
+                onChange={(e) => handleMethodChange(e.target.value)}
                 disabled={state === "loading"}
                 maxLength={64}
                 className="w-full rounded-lg border border-line bg-surface-2 px-4 py-2 text-[13px] text-ink placeholder:text-ink-4 outline-none focus:border-line-2 focus:ring-1 focus:ring-brand-dim transition-colors disabled:opacity-40"
@@ -535,7 +546,11 @@ export function SorobanPanel({
                 )}
 
                 {state === "error" && error && (
-                  <div className="rounded-lg bg-error-dim-muted border border-error-dim px-5 py-4">
+                  <div
+                    role="alert"
+                    data-testid="soroban-error"
+                    className="rounded-lg bg-error-dim-muted border border-error-dim px-5 py-4"
+                  >
                     <p className="text-[13px] text-red">{error}</p>
                   </div>
                 )}
