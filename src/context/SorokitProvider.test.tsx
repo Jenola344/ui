@@ -1055,6 +1055,46 @@ describe("SorokitProvider", () => {
       );
     });
 
+    // #852 — regression test. A throwing disconnect() adapter must leave context.error
+    // non-null, populate walletError with the exception message, and settle isDisconnecting to false.
+    it("asserts disconnect error is visible after isDisconnecting resets (#852)", async () => {
+      const disconnectErrorMessage = "Wallet adapter disconnected with error";
+      mockClient.wallet.disconnect = vi
+        .fn()
+        .mockRejectedValue(new Error(disconnectErrorMessage));
+
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+      });
+
+      expect(screen.getByTestId("error")).toHaveTextContent("none");
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Disconnect"));
+      });
+
+      // isDisconnecting is false after failure
+      expect(screen.getByTestId("isDisconnecting")).toHaveTextContent("false");
+
+      // context.error is non-null and contains the error message
+      await waitFor(() => {
+        expect(screen.getByTestId("error")).toHaveTextContent(
+          disconnectErrorMessage,
+        );
+      });
+      expect(screen.getByTestId("error")).not.toHaveTextContent("none");
+
+      // Error string from the exception is in walletError
+      expect(screen.getByTestId("walletError")).toHaveTextContent(
+        disconnectErrorMessage,
+      );
+    });
+
     it("points getClient() at the provider's client on mount", async () => {
       await act(async () => {
         renderWithProvider(<TestComponent />, { client: mockClient });
